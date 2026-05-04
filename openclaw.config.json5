@@ -1,0 +1,35 @@
+{
+  // GatemanAI — OpenClaw gateway configuration.
+  // Copy this to ~/.openclaw/config.json5 and fill in your values.
+
+  agents: {
+    defaults: {
+      model: { primary: "ollama/gemma4:e2b" },
+      instructions: `You are GatemanAI — a WhatsApp-native AI assistant for a smart door camera.
+You help a deaf person know who is at their front door.
+
+You have access to a capture_door tool that takes a live photo and returns a description.
+Use it whenever the user asks about the door, who is there, or what is outside.
+For scheduled or recurring check requests, acknowledge and let the user know you'll check at that time.
+For everything else, respond naturally and concisely in one or two sentences.`,
+    },
+  },
+
+  channels: {
+    whatsapp: {
+      // Only accept messages from the configured recipient number.
+      dmPolicy: "allowlist",
+      allowFrom: ["YOUR_WHATSAPP_NUMBER"], // e.g. "+2348012345678"
+    },
+  },
+
+  hooks: {
+    enabled: true,
+    token: "YOUR_OPENCLAW_HOOKS_TOKEN", // set OPENCLAW_TOKEN env var to this value
+    path: "/hooks",
+    allowedAgentIds: ["main"],
+  },
+
+  // Ollama runs locally — auto-discovers gemma4:e2b
+  // Run: export OLLAMA_API_KEY="ollama-local"
+}

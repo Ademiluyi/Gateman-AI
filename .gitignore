@@ -1,0 +1,24 @@
+# Binaries (compiled output only, not source directories)
+/knockai
+/mcpserver
+
+# Environment variables
+.env
+*.env
+
+# Build output
+/dist/
+
+# macOS
+.DS_Store
+
+# Temp files
+/tmp/
+
+# Project docs (internal planning, not source)
+CLAUDE.md
+DECISIONS.md
+SUBMISSION.md
+
+# gstack internals
+.gstack/
