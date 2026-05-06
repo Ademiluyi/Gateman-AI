@@ -5,20 +5,35 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"time"
 )
 
 const model = "gemma4:e2b"
 
 const promptImageOnly = `You are helping a deaf person know who is at their door.
-Describe who or what you see in one or two sentences.
-Be specific: mention clothing, approximate age, what they are carrying.
-Example: "A young man in a blue shirt is holding a package at the door."`
+Describe the scene in two or three short sentences.
+
+Always include, when visible:
+- How many people are present (use a number).
+- Each person's clothing, approximate age, and anything they are carrying.
+- Any uniform, badge, or company branding (e.g. DHL, police, delivery driver).
+- Any vehicle, package, or sign visible behind or near them.
+
+Be factual and specific. Do not invent details. If the scene is empty, say so.`
 
 const promptImageAndAudio = `You are helping a deaf person know who is at their door.
-First describe who or what you see (clothing, approximate age, what they are carrying).
-Then transcribe anything being said.
-Example: "A delivery man in a brown uniform is at the door carrying a package. He is saying: 'I have a delivery for you.'"`
+Describe the scene in two or three short sentences, then transcribe anything being said.
+
+Always include, when visible:
+- How many people are present (use a number).
+- Each person's clothing, approximate age, and anything they are carrying.
+- Any uniform, badge, or company branding (e.g. DHL, police, delivery driver).
+- Any vehicle, package, or sign visible behind or near them.
+
+Be factual and specific. Do not invent details.`
 
 // Client calls Ollama's local API to describe an image.
 type Client struct {
@@ -27,18 +42,26 @@ type Client struct {
 }
 
 func New(baseURL string) *Client {
-	return &Client{baseURL: baseURL, http: &http.Client{}}
+	// Cold model load on a memory-constrained Mac can take ~30s; first inference adds another 30-60s.
+	return &Client{baseURL: baseURL, http: &http.Client{Timeout: 5 * time.Minute}}
 }
 
-type ollamaRequest struct {
-	Model  string   `json:"model"`
-	Prompt string   `json:"prompt"`
-	Images []string `json:"images"`
-	Stream bool     `json:"stream"`
+// Gemma 4 vision in Ollama only works via /api/chat — /api/generate silently drops
+// the image and the model asks for one in its reply.
+type chatMessage struct {
+	Role    string   `json:"role"`
+	Content string   `json:"content"`
+	Images  []string `json:"images,omitempty"`
 }
 
-type ollamaResponse struct {
-	Response string `json:"response"`
+type chatRequest struct {
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
+}
+
+type chatResponse struct {
+	Message chatMessage `json:"message"`
 }
 
 // Describe sends an image to Gemma 4 and returns a natural language description.
@@ -46,23 +69,40 @@ func (c *Client) Describe(img []byte) (string, error) {
 	return c.DescribeWithAudio(img, nil)
 }
 
+// DumpRequest serialises the request body that Describe would send and writes it to path.
+// Debug helper for diffing against a known-good curl payload.
+func (c *Client) DumpRequest(img []byte, path string) error {
+	body := chatRequest{
+		Model: model,
+		Messages: []chatMessage{
+			{Role: "user", Content: promptImageOnly, Images: []string{base64.StdEncoding.EncodeToString(img)}},
+		},
+		Stream: false,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, payload, 0644)
+}
+
 // DescribeWithAudio sends an image and optional audio to Gemma 4.
 // Pass nil for audio to describe image only.
 // NOTE: Ollama audio support for Gemma 4 E2B is unverified — test after model pull.
 func (c *Client) DescribeWithAudio(img []byte, audioWAV []byte) (string, error) {
-	p := promptImageOnly
+	prompt := promptImageOnly
 	images := []string{base64.StdEncoding.EncodeToString(img)}
 
 	if len(audioWAV) > 0 {
-		p = promptImageAndAudio
-		// Audio passed as second base64 entry — verify Ollama supports this for Gemma 4.
+		prompt = promptImageAndAudio
 		images = append(images, base64.StdEncoding.EncodeToString(audioWAV))
 	}
 
-	body := ollamaRequest{
-		Model:  model,
-		Prompt: p,
-		Images: images,
+	body := chatRequest{
+		Model: model,
+		Messages: []chatMessage{
+			{Role: "user", Content: prompt, Images: images},
+		},
 		Stream: false,
 	}
 
@@ -71,20 +111,21 @@ func (c *Client) DescribeWithAudio(img []byte, audioWAV []byte) (string, error) 
 		return "", err
 	}
 
-	resp, err := c.http.Post(c.baseURL+"/api/generate", "application/json", bytes.NewReader(payload))
+	resp, err := c.http.Post(c.baseURL+"/api/chat", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("ollama request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ollama returned %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama returned %d: %s", resp.StatusCode, string(errBody))
 	}
 
-	var result ollamaResponse
+	var result chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 
-	return result.Response, nil
+	return result.Message.Content, nil
 }

@@ -17,11 +17,11 @@ func New() *Camera {
 func (c *Camera) Capture() ([]byte, error) {
 	path := fmt.Sprintf("/tmp/gatemanai-%d.jpg", time.Now().UnixMilli())
 
-	// libcamera-still is the standard tool on Pi OS for camera capture.
+	// rpicam-still is the camera capture tool on Raspbian 13+.
 	// -o writes to file, -n disables preview, -t 1 minimises capture delay.
-	cmd := exec.Command("libcamera-still", "-o", path, "-n", "-t", "1")
+	cmd := exec.Command("rpicam-still", "-o", path, "-n", "-t", "1")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("libcamera-still: %w — %s", err, out)
+		return nil, fmt.Errorf("rpicam-still: %w — %s", err, out)
 	}
 
 	data, err := exec.Command("cat", path).Output()
