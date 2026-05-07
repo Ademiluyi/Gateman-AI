@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+// Both vision and the OpenClaw agent use the same 8k variant so Ollama
+// keeps a single model resident in 8GB RAM — no swapping between contexts.
 const model = "gemma4:e2b-8k"
 
 const promptImageOnly = `You are helping a deaf person know who is at their door.
@@ -105,8 +107,7 @@ func (c *Client) DescribeWithAudio(ctx context.Context, img []byte, audioWAV []b
 		Messages: []chatMessage{
 			{Role: "user", Content: prompt, Images: images},
 		},
-		Stream:  false,
-		Options: map[string]any{"num_predict": 120},
+		Stream: false,
 	}
 
 	payload, err := json.Marshal(body)

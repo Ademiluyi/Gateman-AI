@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
@@ -58,6 +59,11 @@ func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 	description, err := vis.Describe(visionCtx, img)
 	if err != nil {
 		log.Printf("vision error: %v", err)
+		return
+	}
+	description = strings.TrimSpace(description)
+	if description == "" {
+		log.Println("vision returned empty description — skipping description send")
 		return
 	}
 	log.Printf("Description: %s", description)
