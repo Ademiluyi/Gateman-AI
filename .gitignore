@@ -1,6 +1,10 @@
 # Binaries (compiled output only, not source directories)
 /knockai
 /mcpserver
+/gatemanai
+/picapture
+/picapture_arm32
+/picapture_arm64
 
 # Environment variables
 .env
