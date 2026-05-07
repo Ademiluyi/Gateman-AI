@@ -4,20 +4,24 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
-	"github.com/ade/gatemanai/internal/vision"
+	"github.com/ade/gatemanai/internal/openclaw"
 )
 
 func main() {
-	ollamaURL := getenv("OLLAMA_URL", "http://localhost:11434")
+	piURL := os.Getenv("PI_URL")
+	to := os.Getenv("OPENCLAW_TO")
+	log.Printf("mcpserver start: PI_URL=%q OPENCLAW_TO=%q", piURL, to)
 	cam := camera.New()
-	vis := vision.New(ollamaURL)
+	oc := openclaw.New(to)
 
 	// MCP uses newline-delimited JSON-RPC over stdio.
 	scanner := bufio.NewScanner(os.Stdin)
@@ -40,14 +44,14 @@ func main() {
 			continue
 		}
 
-		resp := dispatch(req, cam, vis)
+		resp := dispatch(req, cam, oc)
 		if err := enc.Encode(resp); err != nil {
 			log.Printf("encode error: %v", err)
 		}
 	}
 }
 
-func dispatch(req rpcRequest, cam *camera.Camera, vis *vision.Client) rpcResponse {
+func dispatch(req rpcRequest, cam *camera.Camera, oc *openclaw.Client) rpcResponse {
 	switch req.Method {
 	case "initialize":
 		return ok(req.ID, map[string]any{
@@ -78,19 +82,26 @@ func dispatch(req rpcRequest, cam *camera.Camera, vis *vision.Client) rpcRespons
 			return rpcError(req.ID, -32602, "unknown tool")
 		}
 
-		img, err := cam.Capture()
+		captureCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		img, err := cam.Capture(captureCtx)
+		cancel()
 		if err != nil {
 			return toolError(req.ID, fmt.Sprintf("camera error: %v", err))
 		}
 
-		description, err := vis.Describe(img)
+		// Send the photo directly via OpenClaw CLI — no Gemma vision call.
+		// On 8GB RAM the second Gemma call (vision + agent reply) crashes the gateway,
+		// so for inbound we send the raw photo and let the user see for themselves.
+		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err = oc.Send(sendCtx, "Live photo from your door:", img)
+		cancel()
 		if err != nil {
-			return toolError(req.ID, fmt.Sprintf("vision error: %v", err))
+			return toolError(req.ID, fmt.Sprintf("send error: %v", err))
 		}
 
 		return ok(req.ID, map[string]any{
 			"content": []map[string]any{
-				{"type": "text", "text": description},
+				{"type": "text", "text": "Photo sent."},
 			},
 		})
 

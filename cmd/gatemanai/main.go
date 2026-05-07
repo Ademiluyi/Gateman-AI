@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
 	"github.com/ade/gatemanai/internal/doorbell"
@@ -12,47 +14,66 @@ import (
 
 func main() {
 	cfg := config{
-		ollamaURL:     getenv("OLLAMA_URL", "http://localhost:11434"),
-		openclawURL:   getenv("OPENCLAW_URL", "http://localhost:18789"),
-		openclawToken: mustenv("OPENCLAW_TOKEN"),
-		openclawTo:    mustenv("OPENCLAW_TO"),
+		ollamaURL:  getenv("OLLAMA_URL", "http://localhost:11434"),
+		openclawTo: mustenv("OPENCLAW_TO"),
 	}
 
 	cam := camera.New()
 	vis := vision.New(cfg.ollamaURL)
-	oc := openclaw.New(cfg.openclawURL, cfg.openclawToken, cfg.openclawTo)
+	oc := openclaw.New(cfg.openclawTo)
 	bell := doorbell.New()
 
 	log.Println("GatemanAI listening for doorbell...")
 
 	for range bell.Rings() {
-		log.Println("Doorbell triggered — capturing image")
+		go handleRing(cam, vis, oc)
+	}
+}
 
-		img, err := cam.Capture()
-		if err != nil {
-			log.Printf("capture error: %v", err)
-			continue
-		}
+// handleRing pipelines the doorbell flow:
+//  1. Capture (~1s)
+//  2. Send the photo immediately so the user sees who's there fast
+//  3. Run Gemma description in the same goroutine and send as a follow-up
+//
+// Each ring runs in its own goroutine; Ollama serialises vision calls itself.
+func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
+	captureCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	img, err := cam.Capture(captureCtx)
+	cancel()
+	if err != nil {
+		log.Printf("capture error: %v", err)
+		return
+	}
 
-		description, err := vis.Describe(img)
-		if err != nil {
-			log.Printf("vision error: %v", err)
-			continue
-		}
+	sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := oc.Send(sendCtx, "🚪 Doorbell — live photo:", img); err != nil {
+		log.Printf("photo send error: %v", err)
+	} else {
+		log.Println("Photo sent")
+	}
+	cancel()
 
-		log.Printf("Description: %s", description)
+	visionCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	description, err := vis.Describe(visionCtx, img)
+	if err != nil {
+		log.Printf("vision error: %v", err)
+		return
+	}
+	log.Printf("Description: %s", description)
 
-		if err := oc.Send(description, img); err != nil {
-			log.Printf("openclaw send error: %v", err)
-		}
+	descCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := oc.Send(descCtx, description, nil); err != nil {
+		log.Printf("description send error: %v", err)
+	} else {
+		log.Println("Description sent")
 	}
 }
 
 type config struct {
-	ollamaURL     string
-	openclawURL   string
-	openclawToken string
-	openclawTo    string
+	ollamaURL  string
+	openclawTo string
 }
 
 func getenv(key, fallback string) string {

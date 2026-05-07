@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -42,15 +43,17 @@ func main() {
 	}
 	fmt.Println("Asking Gemma 4 to describe the image...")
 	start := time.Now()
-	description, err := vis.Describe(img)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	description, err := vis.Describe(ctx, img)
 	if err != nil {
 		log.Fatalf("vision: %v", err)
 	}
 	fmt.Printf("Gemma replied in %s:\n%s\n\n", time.Since(start).Round(time.Millisecond), description)
 
-	oc := openclaw.New("", "", to)
+	oc := openclaw.New(to)
 	fmt.Println("Sending to WhatsApp...")
-	if err := oc.Send(description, img); err != nil {
+	if err := oc.Send(ctx, description, img); err != nil {
 		log.Fatalf("openclaw send: %v", err)
 	}
 	fmt.Println("Done — check your WhatsApp.")
