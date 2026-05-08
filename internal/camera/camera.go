@@ -1,3 +1,9 @@
+// Package camera fetches a live JPEG from the door camera.
+//
+// In normal operation it talks to the picapture HTTP server running on the Pi
+// (PI_URL/capture). When PI_URL is unset it falls back to invoking rpicam-still
+// locally — useful only on a Pi that runs both capture and inference, never on
+// the laptop.
 package camera
 
 import (

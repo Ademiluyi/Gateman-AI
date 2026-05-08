@@ -2,9 +2,13 @@
 /knockai
 /mcpserver
 /gatemanai
+/doctor
 /picapture
 /picapture_arm32
 /picapture_arm64
+
+# Release build output
+/dist/
 
 # Environment variables
 .env

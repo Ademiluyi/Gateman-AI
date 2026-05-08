@@ -1,3 +1,10 @@
+// Package vision asks Gemma 4 to describe a JPEG.
+//
+// Talks to a local Ollama instance via /api/chat (Gemma 4 vision is broken on
+// /api/generate — the model silently drops the image and asks for one in its
+// reply). The model name is intentionally pinned here so the laptop runs a
+// single resident model for both vision and the OpenClaw agent's text turns,
+// avoiding swap thrashing on 8GB-RAM hardware.
 package vision
 
 import (

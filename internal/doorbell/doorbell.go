@@ -1,3 +1,7 @@
+// Package doorbell long-polls the Pi's /doorbell endpoint and signals each
+// confirmed press on a channel. Network errors trigger exponential backoff so
+// the laptop doesn't hammer the Pi while it's recovering from a router reboot
+// or Wi-Fi flap; the backoff resets to its base on the first successful poll.
 package doorbell
 
 import (

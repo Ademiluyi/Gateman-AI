@@ -1,3 +1,7 @@
+// Package openclaw delivers WhatsApp messages by shelling out to the OpenClaw
+// CLI. The local OpenClaw gateway holds the WhatsApp Web session, so the
+// command itself just hands off the target number, message text, and optional
+// JPEG attachment.
 package openclaw
 
 import (
