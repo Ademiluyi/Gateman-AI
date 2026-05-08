@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"periph.io/x/conn/v3/gpio"
@@ -15,7 +16,22 @@ import (
 
 const gpioPin = "GPIO17"
 
-var doorbellCh = make(chan struct{}, 1)
+// Doorbell event queue: buffers up to maxQueue presses with TTL eviction so
+// rings during a brief laptop / Wi-Fi outage are not lost, but a press that
+// happened hours ago doesn't trigger a stale notification.
+const (
+	maxQueue    = 10
+	doorbellTTL = 5 * time.Minute
+)
+
+var (
+	pendingMu sync.Mutex
+	pending   []time.Time
+
+	// notifyCh signals waiting long-poll handlers that a new press is queued.
+	// Buffered=1 so the GPIO callback never blocks on a slow consumer.
+	notifyCh = make(chan struct{}, 1)
+)
 
 func main() {
 	go listenGPIO()
@@ -53,25 +69,71 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// handleDoorbell long-polls until a doorbell event fires (or 30s timeout).
+// handleDoorbell long-polls until a non-stale doorbell event is queued
+// or the request deadline expires.
+//
+//	200 No Content → no event within the long-poll window
+//	200 OK         → an event is consumed
 func handleDoorbell(w http.ResponseWriter, r *http.Request) {
-	select {
-	case <-doorbellCh:
-		w.WriteHeader(http.StatusOK)
-	case <-time.After(30 * time.Second):
-		w.WriteHeader(http.StatusNoContent) // 204 = no event yet
-	case <-r.Context().Done():
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if claimEvent() {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		select {
+		case <-notifyCh:
+			// new press signalled; loop back and try to claim
+		case <-time.After(remaining):
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case <-r.Context().Done():
+			return
+		}
 	}
 }
 
 // handleTrigger manually fires a doorbell event — useful for testing without a physical button.
 func handleTrigger(w http.ResponseWriter, r *http.Request) {
-	select {
-	case doorbellCh <- struct{}{}:
-		fmt.Fprintln(w, "triggered")
-	default:
-		fmt.Fprintln(w, "already pending")
+	recordPress()
+	fmt.Fprintln(w, "triggered")
+}
+
+// recordPress appends a timestamp to the pending queue (capped at maxQueue,
+// dropping the oldest on overflow) and signals any waiting long-poll handler.
+func recordPress() {
+	pendingMu.Lock()
+	pending = append(pending, time.Now())
+	if len(pending) > maxQueue {
+		pending = pending[len(pending)-maxQueue:]
 	}
+	pendingMu.Unlock()
+
+	select {
+	case notifyCh <- struct{}{}:
+	default:
+	}
+}
+
+// claimEvent removes and returns true for the oldest non-stale press,
+// dropping any stale events in front of it. Returns false if the queue is
+// empty or contains only stale events.
+func claimEvent() bool {
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	for len(pending) > 0 {
+		first := pending[0]
+		pending = pending[1:]
+		if time.Since(first) <= doorbellTTL {
+			return true
+		}
+	}
+	return false
 }
 
 func listenGPIO() {
@@ -97,11 +159,8 @@ func listenGPIO() {
 		pin.WaitForEdge(-1)
 		if pin.Read() == gpio.Low {
 			log.Println("Doorbell pressed")
-			select {
-			case doorbellCh <- struct{}{}:
-			default: // already pending, drop duplicate
-			}
-			time.Sleep(2 * time.Second)
+			recordPress()
+			time.Sleep(2 * time.Second) // debounce
 		}
 	}
 }
