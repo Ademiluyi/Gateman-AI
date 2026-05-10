@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
@@ -41,16 +43,23 @@ var (
 
 func main() {
 	cfg := config{
-		ollamaURL:  getenv("OLLAMA_URL", "http://localhost:11434"),
-		openclawTo: mustenv("OPENCLAW_TO"),
+		ollamaURL: getenv("OLLAMA_URL", "http://localhost:11434"),
+		// OPENCLAW_TO accepts a single number or a comma-separated list.
+		// Every configured target gets the same notifications — useful for
+		// multi-user beta testing.
+		openclawTargets: openclaw.ParseTargets(mustenv("OPENCLAW_TO")),
+	}
+	if len(cfg.openclawTargets) == 0 {
+		log.Fatal("OPENCLAW_TO must contain at least one number")
 	}
 
 	cam := camera.New()
 	vis := vision.New(cfg.ollamaURL)
-	oc := openclaw.New(cfg.openclawTo)
+	oc := openclaw.New(cfg.openclawTargets...)
 	bell := doorbell.New()
 
-	log.Println("GatemanAI listening for doorbell...")
+	log.Printf("GatemanAI listening for doorbell — notifying %d target(s): %s",
+		len(cfg.openclawTargets), strings.Join(cfg.openclawTargets, ", "))
 
 	for range bell.Rings() {
 		go handleRing(cam, vis, oc)
@@ -59,15 +68,21 @@ func main() {
 
 // handleRing pipelines the doorbell flow:
 //  1. Capture (~1s)
-//  2. Send the photo immediately so the user sees who's there fast
-//  3. Run Gemma description in the same goroutine and send as a follow-up
+//  2. Send the photo immediately to every configured target so users see who's
+//     there fast
+//  3. Run Gemma description in the same goroutine and send as a follow-up to
+//     every target
 //
 // Each ring runs in its own goroutine; Ollama serialises vision calls itself.
 // Every external call is wrapped in retry.Do so a single transient blip
 // (Wi-Fi flap, OpenClaw reconnect, brief Ollama pause) doesn't lose the ring.
 func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
+	log.Println("▶ Doorbell pipeline starting")
+	ringStart := time.Now()
+
 	captureCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	var img []byte
+	captureStart := time.Now()
 	err := retry.Do(captureCtx, captureRetry, func(ctx context.Context) error {
 		var err error
 		img, err = cam.Capture(ctx)
@@ -75,55 +90,87 @@ func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 	})
 	cancel()
 	if err != nil {
-		log.Printf("capture failed after retries: %v", err)
+		log.Printf("✗ capture failed after retries: %v", err)
 		return
 	}
+	log.Printf("📸 captured %s in %s", humanBytes(len(img)), elapsed(captureStart))
 
-	sendCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	err = retry.Do(sendCtx, sendRetry, func(ctx context.Context) error {
-		return oc.Send(ctx, "🚪 Doorbell — live photo:", img)
-	})
-	cancel()
-	if err != nil {
-		log.Printf("photo send failed after retries: %v", err)
-	} else {
-		log.Println("Photo sent")
-	}
+	sendToAll(oc, "🚪 Doorbell — live photo:", img)
 
+	log.Println("🧠 Gemma vision describing scene…")
 	visionCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	var description string
+	visionStart := time.Now()
 	err = retry.Do(visionCtx, visionRetry, func(ctx context.Context) error {
 		var err error
 		description, err = vis.Describe(ctx, img)
 		return err
 	})
 	if err != nil {
-		log.Printf("vision failed after retries: %v", err)
+		log.Printf("✗ vision failed after retries: %v", err)
 		return
 	}
 	description = strings.TrimSpace(description)
 	if description == "" {
-		log.Println("vision returned empty description — skipping description send")
+		log.Println("⚠ vision returned empty description — skipping description send")
 		return
 	}
-	log.Printf("Description: %s", description)
+	log.Printf("🧠 Gemma replied in %s (%d chars): %s", elapsed(visionStart), len(description), description)
 
-	descCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	err = retry.Do(descCtx, sendRetry, func(ctx context.Context) error {
-		return oc.Send(ctx, description, nil)
-	})
-	if err != nil {
-		log.Printf("description send failed after retries: %v", err)
-	} else {
-		log.Println("Description sent")
+	sendToAll(oc, description, nil)
+
+	log.Printf("✓ Doorbell pipeline complete in %s", elapsed(ringStart))
+}
+
+// sendToAll fans out a message to every configured target in parallel,
+// each with its own retry budget. One target failing does not stop delivery
+// to the others, and the total wall-clock time is dominated by the slowest
+// target rather than the sum.
+func sendToAll(oc *openclaw.Client, message string, img []byte) {
+	kind := "text"
+	if len(img) > 0 {
+		kind = "photo"
+	}
+	var wg sync.WaitGroup
+	for _, to := range oc.Targets() {
+		wg.Add(1)
+		go func(to string) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			sendStart := time.Now()
+			err := retry.Do(ctx, sendRetry, func(ctx context.Context) error {
+				return oc.Send(ctx, to, message, img)
+			})
+			if err != nil {
+				log.Printf("✗ %s send to %s failed after retries: %v", kind, to, err)
+				return
+			}
+			log.Printf("📤 %s sent to %s in %s", kind, to, elapsed(sendStart))
+		}(to)
+	}
+	wg.Wait()
+}
+
+func elapsed(start time.Time) time.Duration {
+	return time.Since(start).Round(time.Millisecond)
+}
+
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
 	}
 }
 
 type config struct {
-	ollamaURL  string
-	openclawTo string
+	ollamaURL       string
+	openclawTargets []string
 }
 
 func getenv(key, fallback string) string {

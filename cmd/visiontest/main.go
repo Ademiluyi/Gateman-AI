@@ -21,9 +21,9 @@ func main() {
 	}
 	imgPath := os.Args[1]
 
-	to := os.Getenv("OPENCLAW_TO")
-	if to == "" {
-		log.Fatal("OPENCLAW_TO is required (e.g. +19198696632)")
+	targets := openclaw.ParseTargets(os.Getenv("OPENCLAW_TO"))
+	if len(targets) == 0 {
+		log.Fatal("OPENCLAW_TO is required (e.g. +19198696632 or +19198696632,+2348012345678)")
 	}
 	ollamaURL := getenv("OLLAMA_URL", "http://localhost:11434")
 
@@ -51,10 +51,12 @@ func main() {
 	}
 	fmt.Printf("Gemma replied in %s:\n%s\n\n", time.Since(start).Round(time.Millisecond), description)
 
-	oc := openclaw.New(to)
-	fmt.Println("Sending to WhatsApp...")
-	if err := oc.Send(ctx, description, img); err != nil {
-		log.Fatalf("openclaw send: %v", err)
+	oc := openclaw.New(targets...)
+	fmt.Printf("Sending to %d target(s): %v\n", len(targets), targets)
+	for _, to := range oc.Targets() {
+		if err := oc.Send(ctx, to, description, img); err != nil {
+			log.Printf("send to %s: %v", to, err)
+		}
 	}
 	fmt.Println("Done — check your WhatsApp.")
 }

@@ -49,11 +49,12 @@ func main() {
 }
 
 func handleCapture(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	path := fmt.Sprintf("/tmp/gatemanai-%d.jpg", time.Now().UnixMilli())
 
 	cmd := exec.Command("rpicam-still", "-o", path, "-n", "-t", "1", "--width", "640", "--height", "480")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("rpicam-still error: %v — %s", err, out)
+		log.Printf("✗ rpicam-still error: %v — %s", err, out)
 		http.Error(w, "capture failed", http.StatusInternalServerError)
 		return
 	}
@@ -61,12 +62,27 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		log.Printf("✗ read capture file: %v", err)
 		http.Error(w, "read failed", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("📸 served capture: %s in %s (from %s)",
+		humanBytes(len(data)), time.Since(start).Round(time.Millisecond), r.RemoteAddr)
+
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(data)
+}
+
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
 }
 
 // handleDoorbell long-polls until a non-stale doorbell event is queued
@@ -100,6 +116,7 @@ func handleDoorbell(w http.ResponseWriter, r *http.Request) {
 
 // handleTrigger manually fires a doorbell event — useful for testing without a physical button.
 func handleTrigger(w http.ResponseWriter, r *http.Request) {
+	log.Printf("🔔 doorbell triggered via HTTP from %s", r.RemoteAddr)
 	recordPress()
 	fmt.Fprintln(w, "triggered")
 }
@@ -158,7 +175,7 @@ func listenGPIO() {
 	for {
 		pin.WaitForEdge(-1)
 		if pin.Read() == gpio.Low {
-			log.Println("Doorbell pressed")
+			log.Println("🔔 doorbell pressed (GPIO17)")
 			recordPress()
 			time.Sleep(2 * time.Second) // debounce
 		}

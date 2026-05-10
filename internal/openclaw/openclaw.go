@@ -9,24 +9,55 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
-// Client sends WhatsApp messages via the OpenClaw CLI.
+// Client sends WhatsApp messages via the OpenClaw CLI to one or more targets.
 type Client struct {
-	to string
+	targets []string
 }
 
-func New(to string) *Client {
-	return &Client{to: to}
+// New constructs a Client from one or more E.164-formatted phone numbers.
+// Empty strings and surrounding whitespace are stripped.
+func New(targets ...string) *Client {
+	c := &Client{}
+	for _, t := range targets {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			c.targets = append(c.targets, t)
+		}
+	}
+	return c
 }
 
-// Send delivers a WhatsApp message with an optional image via the OpenClaw CLI.
-// Pass nil img for text-only messages.
-func (c *Client) Send(ctx context.Context, description string, img []byte) error {
+// ParseTargets splits a comma-separated list (e.g. "+1555...,+234...") into
+// a normalised slice of E.164 numbers. Whitespace and empty entries are dropped.
+func ParseTargets(s string) []string {
+	var out []string
+	for _, raw := range strings.Split(s, ",") {
+		t := strings.TrimSpace(raw)
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Targets returns the configured recipient list. Safe to read concurrently.
+func (c *Client) Targets() []string { return c.targets }
+
+// Send delivers a WhatsApp message to a single target via the OpenClaw CLI.
+// Pass nil img for text-only messages. Callers loop over Targets() so a single
+// target failing doesn't block the others.
+func (c *Client) Send(ctx context.Context, to, description string, img []byte) error {
+	if to == "" {
+		return fmt.Errorf("openclaw send: empty target")
+	}
+
 	args := []string{
 		"message", "send",
 		"--channel", "whatsapp",
-		"--target", c.to,
+		"--target", to,
 		"--message", description,
 	}
 
