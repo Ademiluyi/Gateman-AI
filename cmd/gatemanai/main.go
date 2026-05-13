@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
-	"github.com/ade/gatemanai/internal/doorbell"
 	"github.com/ade/gatemanai/internal/openclaw"
+	"github.com/ade/gatemanai/internal/presence"
 	"github.com/ade/gatemanai/internal/retry"
 	"github.com/ade/gatemanai/internal/vision"
 )
@@ -56,29 +56,29 @@ func main() {
 	cam := camera.New()
 	vis := vision.New(cfg.ollamaURL)
 	oc := openclaw.New(cfg.openclawTargets...)
-	bell := doorbell.New()
+	det := presence.New()
 
-	log.Printf("GatemanAI listening for doorbell — notifying %d target(s): %s",
+	log.Printf("GatemanAI listening for presence events — notifying %d target(s): %s",
 		len(cfg.openclawTargets), strings.Join(cfg.openclawTargets, ", "))
 
-	for range bell.Rings() {
-		go handleRing(cam, vis, oc)
+	for range det.Events() {
+		go handleEvent(cam, vis, oc)
 	}
 }
 
-// handleRing pipelines the doorbell flow:
+// handleEvent pipelines the presence flow:
 //  1. Capture (~1s)
 //  2. Send the photo immediately to every configured target so users see who's
 //     there fast
 //  3. Run Gemma description in the same goroutine and send as a follow-up to
 //     every target
 //
-// Each ring runs in its own goroutine; Ollama serialises vision calls itself.
+// Each event runs in its own goroutine; Ollama serialises vision calls itself.
 // Every external call is wrapped in retry.Do so a single transient blip
-// (Wi-Fi flap, OpenClaw reconnect, brief Ollama pause) doesn't lose the ring.
-func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
-	log.Println("▶ Doorbell pipeline starting")
-	ringStart := time.Now()
+// (Wi-Fi flap, OpenClaw reconnect, brief Ollama pause) doesn't lose the event.
+func handleEvent(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
+	log.Println("▶ Presence pipeline starting")
+	eventStart := time.Now()
 
 	captureCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	var img []byte
@@ -95,7 +95,7 @@ func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 	}
 	log.Printf("📸 captured %s in %s", humanBytes(len(img)), elapsed(captureStart))
 
-	sendToAll(oc, "🚪 Doorbell — live photo:", img)
+	sendToAll(oc, "🚪 GatemanAI — live photo:", img)
 
 	log.Println("🧠 Gemma vision describing scene…")
 	visionCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -120,7 +120,7 @@ func handleRing(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 
 	sendToAll(oc, description, nil)
 
-	log.Printf("✓ Doorbell pipeline complete in %s", elapsed(ringStart))
+	log.Printf("✓ Presence pipeline complete in %s", elapsed(eventStart))
 }
 
 // sendToAll fans out a message to every configured target in parallel,

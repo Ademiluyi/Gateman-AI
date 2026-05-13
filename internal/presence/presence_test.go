@@ -1,4 +1,4 @@
-package doorbell
+package presence
 
 import (
 	"net/http"
