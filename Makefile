@@ -22,6 +22,7 @@ build:
 	go build -o mcpserver  ./cmd/mcpserver
 	go build -o doctor     ./cmd/doctor
 	go build -o allow      ./cmd/allow
+	go build -o rtspsource ./cmd/rtspsource
 
 cross: cross-arm32 cross-arm64
 
@@ -39,9 +40,9 @@ vet:
 
 release: clean test vet build cross
 	mkdir -p $(DIST)
-	cp gatemanai mcpserver doctor allow picapture_arm32 picapture_arm64 $(DIST)/
+	cp gatemanai mcpserver doctor allow rtspsource picapture_arm32 picapture_arm64 $(DIST)/
 	@echo "Release artefacts ready in $(DIST)/"
 
 clean:
-	rm -f gatemanai mcpserver doctor allow picapture_arm32 picapture_arm64
+	rm -f gatemanai mcpserver doctor allow rtspsource picapture_arm32 picapture_arm64
 	rm -rf $(DIST)

@@ -10,62 +10,62 @@ For the full motivation, design, and submission writeup see [SUBMISSION.md](./SU
 
 ## Demo
 
-> Doorbell rings → photo arrives in ~5 seconds → Gemma description follows ~30 seconds later.
+> Motion at the door → photo arrives in ~5 seconds → Gemma description follows ~30 seconds later.
 > User texts "who's at the door?" → live photo arrives in ~15 seconds.
+> User texts "what happened in the last hour?" → Gemma reads the event log and replies.
 
 ## What you need
 
-- A **Raspberry Pi** with a camera module (any Pi, but 3 B+ is the tested baseline)
-- A **laptop** on the same Wi-Fi as the Pi (8GB RAM minimum; 16GB+ recommended)
+- A **camera source.** Either a **Raspberry Pi** with a camera module (any Pi; 3 B+ is the tested baseline) **or** any **RTSP camera** you already own — Hikvision, Dahua, ONVIF IP cam, ESP32-CAM. See [Use an existing camera](#use-an-existing-camera-rtsphikvisiondahua) below.
+- A **laptop** on the same Wi-Fi as the camera (8GB RAM minimum; 16GB+ recommended)
 - A **WhatsApp account** linked via QR code to OpenClaw
 - [Ollama](https://ollama.com/) ≥ 0.22.1 with `gemma4:e2b` pulled
 - [OpenClaw](https://docs.openclaw.ai/) installed locally
+- `ffmpeg` on the laptop **only if** you're using the RTSP source
 - Go 1.22+ if you're building from source (skip if you're using the [release binaries](#install-from-release))
 
 ## Architecture
 
-Three small Go binaries; one runs on the Pi, two run on the laptop.
+A small set of Go binaries. One runs on the camera host (Pi or laptop), the rest run on the laptop.
 
 ```
-PUSH (doorbell rings → notification)
-[GPIO17 button] → [picapture on Pi] ─HTTP─► [gatemanai on laptop]
-                                                    │
-                                            ┌───────┴────────┐
-                                            ▼ (immediate)    ▼ (background)
-                                  [openclaw send photo]  [Gemma describe]
-                                            │                │
-                                            ▼                ▼
-                                    [WhatsApp: photo]  [openclaw send text]
-                                                              │
-                                                              ▼
-                                                    [WhatsApp: description]
+PUSH (motion / GPIO / manual trigger → notification)
+[Pi camera or RTSP cam]
+        │ motion detected
+        ▼
+[picapture | rtspsource] ─HTTP─► [gatemanai on laptop]
+                                          │
+                                  ┌───────┴────────┐
+                                  ▼ (immediate)    ▼ (background)
+                        [openclaw send photo]  [Gemma describe]
+                                  │                │
+                                  ▼                ▼
+                          [WhatsApp: photo]  [WhatsApp: description]
 
-PULL (user texts → photo)
+PULL (user texts → live photo OR retrospective)
 [User texts WhatsApp] → [OpenClaw] → [Gemma 4 E2B]
-                                           │  (function call)
-                                           ▼
-                                   [MCP: capture_door]
-                                           │
-                                           ▼
-                              [mcpserver on laptop]
-                                           │
-                              ┌────────────┴────────────┐
-                              ▼                         ▼
-                      [HTTP fetch from Pi]   [openclaw send photo direct]
-                                                        │
-                                                        ▼
-                                              [WhatsApp: photo]
+                                          │  (function call)
+                                          ▼
+                                   [mcpserver]
+                                          │
+                ┌─────────────────────────┼─────────────────────────┐
+                ▼                         ▼                         ▼
+       [capture_door]            [recent_events]              [send_photo]
+        live photo            JSONL event log read      retrieve a stored event
 ```
 
-- `picapture` — Pi-side. HTTP server on `:9000` exposing `/capture`, `/doorbell` (long-poll), `/trigger`, `/health`. Watches GPIO17 for button presses with a TTL'd queue so events buffered during a brief outage are delivered when the laptop reconnects.
-- `gatemanai` — laptop-side. Long-polls the Pi for doorbell events. On each ring, captures, sends the photo immediately, then runs Gemma in the background and sends the description as a follow-up. Each external call is wrapped in retry-with-backoff so a single Wi-Fi flap doesn't drop the ring.
-- `mcpserver` — laptop-side, registered with OpenClaw as an MCP server. Exposes a `capture_door` tool the Gemma agent can call. The tool fetches a photo from the Pi and sends it directly to WhatsApp.
+- `picapture` — Pi-side. HTTP server on `:9000` exposing `/capture`, `/presence` (long-poll), `/trigger`, `/health`. Runs software motion detection on the camera stream and an optional GPIO listener (button or PIR via `GPIO_TRIGGER_EDGE`).
+- `rtspsource` — laptop-side. **Drop-in replacement for `picapture` against any RTSP camera.** Same HTTP contract; pulls frames via `ffmpeg`. Lets you use GatemanAI on a Hikvision DVR or any IP cam you already own — no Pi required.
+- `gatemanai` — laptop-side. Long-polls the camera source for presence events. On each event: captures, sends the photo immediately, then runs Gemma in the background and sends the description as a follow-up. Persists every event to `~/.gatemanai/events.jsonl` with a 7-day janitor. Each external call is retry-with-backoff so a single Wi-Fi flap doesn't drop the event.
+- `mcpserver` — laptop-side, registered with OpenClaw as an MCP server. Exposes three tools to the Gemma agent: `capture_door` (live photo), `recent_events` (windowed listing of past events), and `send_photo` (retrieve the JPEG for a specific event ID).
+- `doctor` — pre-flight health check (camera reachable, Ollama up, model loaded, gateway running, MCP registered, env vars set).
+- `allow` — operator helper: adds a tester's number to both `channels.whatsapp.allowFrom` and the MCP server's `OPENCLAW_TO` env in one command.
 
 ## Install from release
 
 Pre-built binaries are on the [Releases page](../../releases). Download the matching artefact for each host:
 
-- Laptop (macOS or Linux): `gatemanai`, `mcpserver`, `doctor`
+- Laptop (macOS or Linux): `gatemanai`, `mcpserver`, `doctor`, `allow`, `rtspsource` (only needed if you're using an RTSP camera)
 - Pi 3 B+ / 32-bit Raspberry Pi OS: `picapture_arm32`
 - Pi 4 / 5 with 64-bit OS: `picapture_arm64`
 
@@ -76,7 +76,7 @@ Pre-built binaries are on the [Releases page](../../releases). Download the matc
 ```bash
 git clone https://github.com/ade/gatemanai
 cd gatemanai
-make build      # gatemanai, mcpserver, doctor for the host
+make build      # gatemanai, mcpserver, doctor, allow, rtspsource for the host
 make cross      # picapture_arm32 + picapture_arm64 for the Pi
 make test       # full test suite
 ```
@@ -144,6 +144,24 @@ scp picapture_arm32 pi@<pi-ip>:~/picapture
 ssh pi@<pi-ip> "chmod +x ~/picapture"
 ```
 
+## Use an existing camera (RTSP/Hikvision/Dahua)
+
+If you already own a CCTV DVR or IP camera that exposes RTSP, skip the Pi entirely and run `rtspsource` on the laptop instead. It implements the same HTTP contract as `picapture`, so the rest of the system doesn't know the difference.
+
+```bash
+brew install ffmpeg                # or: apt install ffmpeg
+RTSP_URL="rtsp://admin:pass@192.168.0.50:554/Streaming/Channels/101" ./rtspsource
+```
+
+Then point `gatemanai` at the local source instead of the Pi:
+
+```bash
+export PI_URL=http://127.0.0.1:9000
+./gatemanai
+```
+
+Same motion detection, same WhatsApp pipeline, same MCP retrospective. The DVR keeps recording untouched.
+
 ## Run
 
 On the Pi:
@@ -172,7 +190,7 @@ Verify everything is reachable before recording a demo:
 
 ## Try it
 
-**Outbound push** — fire a doorbell event manually:
+**Outbound push** — fire a presence event manually (or just walk in front of the camera and let motion detection fire it):
 
 ```bash
 curl http://<pi-ip>:9000/trigger
@@ -180,7 +198,7 @@ curl http://<pi-ip>:9000/trigger
 
 A WhatsApp photo arrives in ~5 seconds; Gemma's description follows as a second message ~30 seconds later.
 
-**Inbound pull** — text your linked WhatsApp number:
+**Inbound pull — live** — text your linked WhatsApp number:
 
 ```
 /new
@@ -189,20 +207,34 @@ Who's at the door?
 
 A live photo + brief acknowledgment arrive in ~15 seconds. The `/new` resets OpenClaw's session memory; see `DECISIONS.md` for why.
 
+**Inbound pull — retrospective** — same WhatsApp thread:
+
+```
+/new
+What happened in the last hour?
+```
+
+Gemma reads the event log and replies with a list of recent events (timestamp + scene description). Follow up with "show me the 3pm one" and `send_photo` retrieves the JPEG.
+
 ## Repository layout
 
 ```
 cmd/
-  gatemanai/      laptop process: doorbell loop + outbound pipeline
-  mcpserver/      MCP stdio server: capture_door tool for the agent
-  picapture/      Pi HTTP server: capture, doorbell, trigger, health
+  gatemanai/      laptop process: presence loop + outbound pipeline + event store
+  mcpserver/      MCP stdio server: capture_door, recent_events, send_photo
+  picapture/      Pi HTTP server: capture, presence (long-poll), trigger, health
+  rtspsource/     drop-in replacement for picapture against any RTSP camera
   doctor/         pre-flight system health check
+  allow/          operator helper: sync allowFrom + MCP env in one command
   visiontest/     ad-hoc vision + WhatsApp test harness
 internal/
-  camera/         HTTP capture client (Pi-aware, tested)
-  doorbell/       long-poll the Pi for events with backoff (tested)
+  camera/         HTTP capture client (tested)
+  presence/       long-poll the camera source with adaptive backoff (tested)
+  motion/         pure-Go frame-differencing motion detector (tested)
+  events/         JSONL event store + 7-day janitor (tested)
   vision/         Ollama /api/chat client for Gemma 4
-  openclaw/       OpenClaw CLI wrapper for WhatsApp sends
+  openclaw/       OpenClaw CLI wrapper for WhatsApp sends (tested)
+  audio/          (reserved for audio hooks)
   retry/          generic exponential-backoff helper (tested)
 ```
 
