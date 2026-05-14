@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ade/gatemanai/internal/camera"
+	"github.com/ade/gatemanai/internal/events"
 	"github.com/ade/gatemanai/internal/openclaw"
 	"github.com/ade/gatemanai/internal/presence"
 	"github.com/ade/gatemanai/internal/retry"
@@ -58,11 +59,54 @@ func main() {
 	oc := openclaw.New(cfg.openclawTargets...)
 	det := presence.New()
 
+	store := openEventStore()
+	go janitor(store)
+
 	log.Printf("GatemanAI listening for presence events — notifying %d target(s): %s",
 		len(cfg.openclawTargets), strings.Join(cfg.openclawTargets, ", "))
 
 	for range det.Events() {
-		go handleEvent(cam, vis, oc)
+		go handleEvent(cam, vis, oc, store)
+	}
+}
+
+// openEventStore creates ~/.gatemanai/{events.jsonl,photos/} and returns a
+// handle. Returns nil if creation fails — the pipeline still works without
+// persistence, just without retrospective queries. We log the error and move
+// on so a misconfigured home dir doesn't take down the system.
+func openEventStore() *events.JSONLStore {
+	root, err := events.DefaultRoot()
+	if err != nil {
+		log.Printf("⚠ event store disabled: %v", err)
+		return nil
+	}
+	s, err := events.NewJSONLStore(root)
+	if err != nil {
+		log.Printf("⚠ event store disabled: %v", err)
+		return nil
+	}
+	log.Printf("📒 event log: %s (retention 7 days)", root)
+	return s
+}
+
+// janitor purges events older than 7 days every hour. Single writer of the
+// store; mcpserver is read-only so this is safe.
+func janitor(store *events.JSONLStore) {
+	if store == nil {
+		return
+	}
+	const retention = 7 * 24 * time.Hour
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		removed, err := store.Purge(retention)
+		if err != nil {
+			log.Printf("⚠ event purge: %v", err)
+			continue
+		}
+		if removed > 0 {
+			log.Printf("🧹 purged %d event(s) older than 7 days", removed)
+		}
 	}
 }
 
@@ -76,9 +120,10 @@ func main() {
 // Each event runs in its own goroutine; Ollama serialises vision calls itself.
 // Every external call is wrapped in retry.Do so a single transient blip
 // (Wi-Fi flap, OpenClaw reconnect, brief Ollama pause) doesn't lose the event.
-func handleEvent(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
+func handleEvent(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client, store *events.JSONLStore) {
 	log.Println("▶ Presence pipeline starting")
 	eventStart := time.Now()
+	eventID := events.NewID(eventStart)
 
 	captureCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	var img []byte
@@ -95,6 +140,18 @@ func handleEvent(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 	}
 	log.Printf("📸 captured %s in %s", humanBytes(len(img)), elapsed(captureStart))
 
+	// Persist the photo before sending so the retrospective query path can
+	// always find it. If the store is unavailable, log and continue — the
+	// live notification flow still works without persistence.
+	photoPath := ""
+	if store != nil {
+		photoPath = store.PhotoPath(eventID)
+		if err := os.WriteFile(photoPath, img, 0644); err != nil {
+			log.Printf("⚠ persist photo: %v", err)
+			photoPath = ""
+		}
+	}
+
 	sendToAll(oc, "🚪 GatemanAI — live photo:", img)
 
 	log.Println("🧠 Gemma vision describing scene…")
@@ -109,18 +166,39 @@ func handleEvent(cam *camera.Camera, vis *vision.Client, oc *openclaw.Client) {
 	})
 	if err != nil {
 		log.Printf("✗ vision failed after retries: %v", err)
+		appendEvent(store, eventID, eventStart, "[vision failed]", photoPath)
 		return
 	}
 	description = strings.TrimSpace(description)
 	if description == "" {
 		log.Println("⚠ vision returned empty description — skipping description send")
+		appendEvent(store, eventID, eventStart, "[no description]", photoPath)
 		return
 	}
 	log.Printf("🧠 Gemma replied in %s (%d chars): %s", elapsed(visionStart), len(description), description)
 
 	sendToAll(oc, description, nil)
 
-	log.Printf("✓ Presence pipeline complete in %s", elapsed(eventStart))
+	appendEvent(store, eventID, eventStart, description, photoPath)
+	log.Printf("✓ Presence pipeline complete in %s (id=%s)", elapsed(eventStart), eventID)
+}
+
+// appendEvent persists a record to the event log. Always called even on
+// partial failures so the retrospective query path can show that something
+// happened, even if the description is missing.
+func appendEvent(store *events.JSONLStore, id string, ts time.Time, description, photoPath string) {
+	if store == nil {
+		return
+	}
+	err := store.Append(events.Event{
+		ID:          id,
+		Timestamp:   ts,
+		Description: description,
+		PhotoPath:   photoPath,
+	})
+	if err != nil {
+		log.Printf("⚠ persist event: %v", err)
+	}
 }
 
 // sendToAll fans out a message to every configured target in parallel,
