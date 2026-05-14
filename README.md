@@ -1,10 +1,10 @@
 # GatemanAI
 
-**Physical AI for the front door, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/google-gemma-3-hackathon).
+**Physical AI for environmental awareness, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
-When someone arrives at your door, GatemanAI captures a photo, has Gemma 4 describe what it sees, and sends both to your WhatsApp. You can also text the system anytime to ask "who's at the door?" and get a live photo back. No app to install. No cloud AI. No per-message fees. Runs entirely on a Raspberry Pi and a laptop on your local network.
+When someone arrives at your door, GatemanAI captures a photo, has Gemma 4 describe what it sees, and sends both to your WhatsApp. You can also text the system anytime to ask "who's at the door?" and get a live photo back. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
 
-The first user is a deaf person who cannot hear a doorbell. The second is a small-business owner in Lagos who needs to see who's at the gate without leaving the till. The longer arc is physical AI for the 2 billion people who interact with the world primarily through WhatsApp.
+The first use case is a deaf person who cannot hear a doorbell. The second is a small-business owner in Lagos who needs to see who's at the gate without leaving the till. The longer arc is physical AI for the 2 billion people who interact with the world primarily through WhatsApp.
 
 For the full motivation, design, and submission writeup see [SUBMISSION.md](./SUBMISSION.md). For architectural decisions and constraints see [DECISIONS.md](./DECISIONS.md).
 
@@ -215,6 +215,12 @@ What happened in the last hour?
 ```
 
 Gemma reads the event log and replies with a list of recent events (timestamp + scene description). Follow up with "show me the 3pm one" and `send_photo` retrieves the JPEG.
+
+## Privacy
+
+GatemanAI is local-first. All AI inference runs on the user's laptop; photos and Gemma's descriptions never leave the local network except as the WhatsApp messages the user explicitly opts into by linking their account.
+
+Event history (timestamps, descriptions, and JPEGs) is persisted to `~/.gatemanai/` for **7 days** so retrospective queries ("what happened today?") can answer. A janitor goroutine purges anything older every hour. The operator can shorten or disable retention by editing the constant in `cmd/gatemanai/main.go`, or wipe history at any time with `rm -rf ~/.gatemanai`.
 
 ## Repository layout
 
