@@ -116,7 +116,7 @@ func dispatch(req rpcRequest, cam *camera.Camera, oc *openclaw.Client, store *ev
 						"properties": map[string]any{
 							"window": map[string]any{
 								"type":        "string",
-								"description": "Time window to look back over. Examples: '30m', '1h', '6h', '24h', '7d'. Defaults to '1h' if omitted.",
+								"description": "Time window to look back over. Examples: '30m', '1h', '6h', '24h', '7d'. Defaults to '24h' if omitted.",
 							},
 						},
 					},
@@ -207,7 +207,7 @@ func handleRecentEvents(id json.RawMessage, args json.RawMessage, store *events.
 		}
 	}
 	if params.Window == "" {
-		params.Window = "1h"
+		params.Window = "24h"
 	}
 
 	window, err := parseWindow(params.Window)

@@ -4,7 +4,7 @@
 
   agents: {
     defaults: {
-      model: { primary: "ollama/gemma4:e2b" },
+      model: { primary: "ollama/gemma4:e2b-8k" },
       instructions: `You are GatemanAI — a WhatsApp-native AI assistant for a smart door camera.
 You help a deaf person know who is at their front door.
 
@@ -30,6 +30,8 @@ For everything else, respond naturally and concisely in one or two sentences.`,
     allowedAgentIds: ["main"],
   },
 
-  // Ollama runs locally — auto-discovers gemma4:e2b
+  // Ollama runs locally — uses the 8k-context Modelfile (gemma4:e2b-8k) so the
+  // agent and the vision tool share one resident model on 8GB RAM. See README
+  // "Configure" step 1 for the Modelfile recipe.
   // Run: export OLLAMA_API_KEY="ollama-local"
 }

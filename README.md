@@ -234,7 +234,6 @@ internal/
   events/         JSONL event store + 7-day janitor (tested)
   vision/         Ollama /api/chat client for Gemma 4
   openclaw/       OpenClaw CLI wrapper for WhatsApp sends (tested)
-  audio/          (reserved for audio hooks)
   retry/          generic exponential-backoff helper (tested)
 ```
 
