@@ -2,7 +2,7 @@
 
 **Physical AI for environmental awareness, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
-When enters a monitored space, GatemanAI captures a photo, has Gemma 4 describe what it sees, and sends both to your WhatsApp. You can also text the system anytime to ask "who's at the door?" and get a live photo back. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
+When someone enters a monitored space, GatemanAI captures a photo, has Gemma 4 describe what it sees, and sends both to your WhatsApp. You can also text the system anytime to ask "who's at the door?" and get a live photo back. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
 
 The first use case is a deaf person who cannot hear a doorbell. The second is a small-business owner in Lagos who needs to see who's at the gate without leaving the till. The longer arc is physical AI for the 2 billion people who interact with the world primarily through WhatsApp.
 
