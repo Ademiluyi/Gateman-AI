@@ -1,5 +1,8 @@
-// mcpserver is a Model Context Protocol stdio server that exposes a capture_door tool.
-// OpenClaw spawns this binary and Gemma calls the tool when it needs to see the door.
+// mcpserver is a Model Context Protocol stdio server that exposes three tools
+// (capture_door, recent_events, send_photo) to the Gemma agent over JSON-RPC.
+// OpenClaw spawns this binary; Gemma calls the tools to capture a live frame,
+// list past events, or retrieve a stored photo. The "door" in the tool name
+// is legacy — the camera can watch any entrance or perimeter.
 package main
 
 import (
@@ -102,7 +105,7 @@ func dispatch(req rpcRequest, cam *camera.Camera, oc *openclaw.Client, store *ev
 			"tools": []map[string]any{
 				{
 					"name":        "capture_door",
-					"description": "Capture a live photo from the door camera right now and send it to the user via WhatsApp. Use when the user wants to know who is at the door this moment.",
+					"description": "Capture a live photo from the camera right now and send it to the user via WhatsApp. Use when the user wants to know who is outside, who is at the entrance, or what is happening right this moment.",
 					"inputSchema": map[string]any{
 						"type":       "object",
 						"properties": map[string]any{},
@@ -179,7 +182,7 @@ func handleCaptureDoor(id json.RawMessage, cam *camera.Camera, oc *openclaw.Clie
 	}
 	log.Printf("📸 captured %s in %s", humanBytes(len(img)), time.Since(captureStart).Round(time.Millisecond))
 
-	if err := fanOutPhoto(oc, img, "Live photo from your door:"); err != nil {
+	if err := fanOutPhoto(oc, img, "Live photo from your camera:"); err != nil {
 		return toolError(id, err.Error())
 	}
 
@@ -362,13 +365,6 @@ func toolError(id json.RawMessage, msg string) rpcResponse {
 		"content": []map[string]any{{"type": "text", "text": msg}},
 		"isError": true,
 	})
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func humanBytes(n int) string {

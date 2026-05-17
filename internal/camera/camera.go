@@ -1,4 +1,5 @@
-// Package camera fetches a live JPEG from the door camera.
+// Package camera fetches a live JPEG from the perimeter camera source
+// (Pi running picapture, or laptop running rtspsource).
 //
 // In normal operation it talks to the picapture HTTP server running on the Pi
 // (PI_URL/capture). When PI_URL is unset it falls back to invoking rpicam-still

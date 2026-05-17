@@ -54,14 +54,15 @@ func handleCapture(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	path := fmt.Sprintf("/tmp/gatemanai-%d.jpg", time.Now().UnixMilli())
 
-	// Serialise with the motion detection loop — rpicam-still can't share
-	// the camera device with itself.
+	// Serialise with the motion detection loop — the underlying camera
+	// command can't share the device with itself.
 	motionMu.Lock()
-	cmd := exec.Command("rpicam-still", "-o", path, "-n", "-t", "1", "--width", "640", "--height", "480")
+	cmdName := resolveCameraCmd()
+	cmd := exec.Command(cmdName, captureArgs(path, 640, 480)...)
 	out, err := cmd.CombinedOutput()
 	motionMu.Unlock()
 	if err != nil {
-		log.Printf("✗ rpicam-still error: %v — %s", err, out)
+		log.Printf("✗ %s error: %v — %s", cmdName, err, out)
 		http.Error(w, "capture failed", http.StatusInternalServerError)
 		return
 	}

@@ -15,15 +15,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 )
 
 // Both vision and the OpenClaw agent use the same 8k variant so Ollama
 // keeps a single model resident in 8GB RAM — no swapping between contexts.
-const model = "gemma4:e2b-8k"
+const Model = "gemma4:e2b-8k"
 
-const promptImageOnly = `You are helping a deaf person know who is at their door.
+const promptImageOnly = `You are helping someone know what is happening in a space their camera is watching (an entrance, gate, shopfront, or perimeter).
 Describe the scene in two or three short sentences.
 
 Always include, when visible:
@@ -33,17 +32,6 @@ Always include, when visible:
 - Any vehicle, package, or sign visible behind or near them.
 
 Be factual and specific. Do not invent details. If the scene is empty, say so.`
-
-const promptImageAndAudio = `You are helping a deaf person know who is at their door.
-Describe the scene in two or three short sentences, then transcribe anything being said.
-
-Always include, when visible:
-- How many people are present (use a number).
-- Each person's clothing, approximate age, and anything they are carrying.
-- Any uniform, badge, or company branding (e.g. DHL, police, delivery driver).
-- Any vehicle, package, or sign visible behind or near them.
-
-Be factual and specific. Do not invent details.`
 
 // Client calls Ollama's local API to describe an image.
 type Client struct {
@@ -77,42 +65,10 @@ type chatResponse struct {
 
 // Describe sends an image to Gemma 4 and returns a natural language description.
 func (c *Client) Describe(ctx context.Context, img []byte) (string, error) {
-	return c.DescribeWithAudio(ctx, img, nil)
-}
-
-// DumpRequest serialises the request body that Describe would send and writes it to path.
-// Debug helper for diffing against a known-good curl payload.
-func (c *Client) DumpRequest(img []byte, path string) error {
 	body := chatRequest{
-		Model: model,
+		Model: Model,
 		Messages: []chatMessage{
 			{Role: "user", Content: promptImageOnly, Images: []string{base64.StdEncoding.EncodeToString(img)}},
-		},
-		Stream: false,
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, payload, 0644)
-}
-
-// DescribeWithAudio sends an image and optional audio to Gemma 4.
-// Pass nil for audio to describe image only.
-// NOTE: Ollama audio support for Gemma 4 E2B is unverified — test after model pull.
-func (c *Client) DescribeWithAudio(ctx context.Context, img []byte, audioWAV []byte) (string, error) {
-	prompt := promptImageOnly
-	images := []string{base64.StdEncoding.EncodeToString(img)}
-
-	if len(audioWAV) > 0 {
-		prompt = promptImageAndAudio
-		images = append(images, base64.StdEncoding.EncodeToString(audioWAV))
-	}
-
-	body := chatRequest{
-		Model: model,
-		Messages: []chatMessage{
-			{Role: "user", Content: prompt, Images: images},
 		},
 		Stream: false,
 	}

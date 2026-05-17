@@ -17,7 +17,7 @@ import (
 //	MOTION_ENABLED        bool    default true        — turn the loop on/off
 //	MOTION_INTERVAL_MS    int     default 3000        — sleep between captures
 //	MOTION_COOLDOWN_S     int     default 30          — quiet window after a fire
-//	MOTION_THRESHOLD      float64 default 20          — mean-abs-diff threshold (0-255)
+//	MOTION_THRESHOLD      float64 default 10          — mean-abs-diff threshold (0-255)
 //	MOTION_EDGE_CROP      float64 default 0.05        — ignore outer N% of frame
 //
 // All four are independently tunable so the operator can dial sensitivity
@@ -35,7 +35,7 @@ func loadMotionConfig() motionConfig {
 		enabled:   envBool("MOTION_ENABLED", true),
 		interval:  time.Duration(envInt("MOTION_INTERVAL_MS", 3000)) * time.Millisecond,
 		cooldown:  time.Duration(envInt("MOTION_COOLDOWN_S", 30)) * time.Second,
-		threshold: envFloat("MOTION_THRESHOLD", 20),
+		threshold: envFloat("MOTION_THRESHOLD", 10),
 		edgeCrop:  envFloat("MOTION_EDGE_CROP", 0.05),
 	}
 }
@@ -100,16 +100,18 @@ func runMotionLoop(cfg motionConfig) {
 	}
 }
 
-// captureForMotion takes a fresh JPEG via rpicam-still under the camera mutex.
-// Returns the JPEG bytes; the caller decides what to do with them.
+// captureForMotion takes a fresh JPEG via the auto-detected camera command
+// under the camera mutex. Returns the JPEG bytes; the caller decides what to
+// do with them.
 func captureForMotion() ([]byte, error) {
 	motionMu.Lock()
 	defer motionMu.Unlock()
 
 	path := fmt.Sprintf("/tmp/gatemanai-motion-%d.jpg", time.Now().UnixMilli())
-	cmd := exec.Command("rpicam-still", "-o", path, "-n", "-t", "1", "--width", "640", "--height", "480")
+	cmdName := resolveCameraCmd()
+	cmd := exec.Command(cmdName, captureArgs(path, 640, 480)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("rpicam-still: %w — %s", err, out)
+		return nil, fmt.Errorf("%s: %w — %s", cmdName, err, out)
 	}
 	defer os.Remove(path)
 	return os.ReadFile(path)

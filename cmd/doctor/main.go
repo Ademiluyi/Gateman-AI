@@ -35,6 +35,7 @@ func main() {
 		{"Pi /capture endpoint", checkPiCapture(*piURL)},
 		{"Ollama reachable", checkURL(*ollamaURL + "/api/tags")},
 		{fmt.Sprintf("Ollama has model %q", *model), checkOllamaModel(*ollamaURL, *model)},
+		{"OpenClaw config pins agent to " + *model, checkOpenClawConfigModel(*model)},
 		{"OpenClaw gateway running", checkOpenClawGateway},
 		{"OpenClaw MCP server registered", checkOpenClawMCP},
 		{"OPENCLAW_TO env var set", checkEnv("OPENCLAW_TO")},
@@ -174,6 +175,44 @@ func checkOpenClawMCP() error {
 		return fmt.Errorf("gatemanai-camera not registered; run: openclaw mcp set gatemanai-camera ...")
 	}
 	return nil
+}
+
+// checkOpenClawConfigModel guards against the failure mode where the
+// OpenClaw agent and our vision client end up pointing at different model
+// names — which silently keeps two models resident in RAM and tanks
+// performance on 8GB laptops. The config can live as JSON or JSON5;
+// rather than pull in a JSON5 parser we just substring-match the model
+// declaration. Cheap and correct: if the model name string isn't present
+// somewhere in the config file, the agent is running on a different model.
+func checkOpenClawConfigModel(want string) func() error {
+	return func() error {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home: %w", err)
+		}
+		paths := []string{
+			home + "/.openclaw/config.json5",
+			home + "/.openclaw/config.json",
+			home + "/.openclaw/openclaw.json",
+		}
+		var configPath string
+		var raw []byte
+		for _, p := range paths {
+			b, err := os.ReadFile(p)
+			if err == nil {
+				configPath = p
+				raw = b
+				break
+			}
+		}
+		if configPath == "" {
+			return fmt.Errorf("no OpenClaw config found at %v", paths)
+		}
+		if !strings.Contains(string(raw), want) {
+			return fmt.Errorf("%s does not reference %q — agent likely on a different model, defeating the single-resident-model design", configPath, want)
+		}
+		return nil
+	}
 }
 
 func checkEnv(key string) func() error {

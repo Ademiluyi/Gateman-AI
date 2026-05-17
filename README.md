@@ -1,22 +1,25 @@
 # GatemanAI
 
+[![CI](https://github.com/Ademiluyi/Gateman-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Ademiluyi/Gateman-AI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 **Physical AI for environmental awareness, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
-When someone enters a monitored space, GatemanAI captures a photo, has Gemma 4 describe what it sees, and sends both to your WhatsApp. You can also text the system anytime to ask "who's at the door?" and get a live photo back. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
+GatemanAI compresses video surveillance into queryable events. A local AI watches your camera in real time, summarises what it sees as text + a key frame, and persists those summaries as an event log you can query over WhatsApp. Storage drops from gigabytes a day to kilobytes. Retrieval becomes a conversation, not a video scrubber. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
 
-The first use case is a deaf person who cannot hear a doorbell. The second is a small-business owner in Lagos who needs to see who's at the gate without leaving the till. The longer arc is physical AI for the 2 billion people who interact with the world primarily through WhatsApp.
+The first use case is a deaf person who can't hear someone arriving. The second is a small-business owner in Lagos who needs to know who's outside the shop without leaving the till. The longer arc is agentic surveillance for the 2 billion people who use WhatsApp daily — the markets traditional CCTV and cloud doorbells don't reach.
 
 For the full motivation, design, and submission writeup see [SUBMISSION.md](./SUBMISSION.md). For architectural decisions and constraints see [DECISIONS.md](./DECISIONS.md).
 
 ## Demo
 
-> Motion at the door → photo arrives in ~5 seconds → Gemma description follows ~30 seconds later.
-> User texts "who's at the door?" → live photo arrives in ~15 seconds.
+> Motion at the entrance → photo arrives in ~5 seconds → Gemma description follows ~30 seconds later.
+> User texts "who's outside?" → live photo arrives in ~15 seconds.
 > User texts "what happened in the last hour?" → Gemma reads the event log and replies.
 
 ## What you need
 
-- A **camera source.** Either a **Raspberry Pi** with a camera module (any Pi; 3 B+ is the tested baseline) **or** any **RTSP camera** you already own — Hikvision, Dahua, ONVIF IP cam, ESP32-CAM. See [Use an existing camera](#use-an-existing-camera-rtsphikvisiondahua) below.
+- A **camera source.** Either a **Raspberry Pi** with a camera module (Pi 3 B+ is the tested baseline; Pi 4 / 5 also work) **or** any **RTSP camera** you already own — Hikvision, Dahua, ONVIF IP cam, ESP32-CAM. See [Use an existing camera](#use-an-existing-camera-rtsphikvisiondahua) below. The Pi binary auto-detects the still-capture tool: `rpicam-still` (Bookworm), `libcamera-still` (Bullseye), or `raspistill` (Buster).
 - A **laptop** on the same Wi-Fi as the camera (8GB RAM minimum; 16GB+ recommended)
 - A **WhatsApp account** linked via QR code to OpenClaw
 - [Ollama](https://ollama.com/) ≥ 0.22.1 with `gemma4:e2b` pulled
@@ -58,7 +61,7 @@ PULL (user texts → live photo OR retrospective)
 - `rtspsource` — laptop-side. **Drop-in replacement for `picapture` against any RTSP camera.** Same HTTP contract; pulls frames via `ffmpeg`. Lets you use GatemanAI on a Hikvision DVR or any IP cam you already own — no Pi required.
 - `gatemanai` — laptop-side. Long-polls the camera source for presence events. On each event: captures, sends the photo immediately, then runs Gemma in the background and sends the description as a follow-up. Persists every event to `~/.gatemanai/events.jsonl` with a 7-day janitor. Each external call is retry-with-backoff so a single Wi-Fi flap doesn't drop the event.
 - `mcpserver` — laptop-side, registered with OpenClaw as an MCP server. Exposes three tools to the Gemma agent: `capture_door` (live photo), `recent_events` (windowed listing of past events), and `send_photo` (retrieve the JPEG for a specific event ID).
-- `doctor` — pre-flight health check (camera reachable, Ollama up, model loaded, gateway running, MCP registered, env vars set).
+- `doctor` — pre-flight health check. Runs 8 verifications: camera reachable, camera serves a real JPEG (magic-bytes), Ollama reachable, Ollama has the pinned model, OpenClaw config pins the agent to the same model (catches config drift), OpenClaw gateway running, MCP server registered, `OPENCLAW_TO` set.
 - `allow` — operator helper: adds a tester's number to both `channels.whatsapp.allowFrom` and the MCP server's `OPENCLAW_TO` env in one command.
 
 ## Install from release
@@ -116,7 +119,7 @@ Scan the QR with the WhatsApp account that will receive notifications. Then edit
   "agents": {
     "defaults": {
       "model": "ollama/gemma4:e2b-8k",
-      "systemPromptOverride": "You are GatemanAI — a WhatsApp-native AI assistant for a smart door camera. You have one tool: capture_door. It captures a live photo AND sends it directly via WhatsApp. When the user asks about the door, who is there, or what is outside, immediately call capture_door. After it returns, reply with five words or fewer like 'Photo sent.' For unrelated messages, respond in one short sentence."
+      "systemPromptOverride": "You are GatemanAI — a WhatsApp-native AI assistant for a perimeter camera. You have one tool: capture_door (legacy name; it captures from whatever camera you've configured). It takes a live photo AND sends it directly via WhatsApp. When the user asks who is outside, who is at the entrance, or what is happening, immediately call the tool. After it returns, reply with five words or fewer like 'Photo sent.' For unrelated messages, respond in one short sentence."
     }
   }
 }
@@ -186,7 +189,7 @@ Verify everything is reachable before recording a demo:
 ./doctor
 ```
 
-`doctor` checks the Pi, Ollama, the gemma4:e2b-8k model, OpenClaw, the MCP registration, and the env vars — and prints PASS/FAIL for each.
+`doctor` runs 8 checks (camera reachable, camera serves a real JPEG, Ollama reachable, model loaded, OpenClaw config pins the same model, gateway running, MCP registered, `OPENCLAW_TO` set) and prints PASS/FAIL for each. Non-zero exit on any failure.
 
 ## Try it
 
@@ -202,7 +205,7 @@ A WhatsApp photo arrives in ~5 seconds; Gemma's description follows as a second 
 
 ```
 /new
-Who's at the door?
+Who's outside?
 ```
 
 A live photo + brief acknowledgment arrive in ~15 seconds. The `/new` resets OpenClaw's session memory; see `DECISIONS.md` for why.
@@ -215,6 +218,22 @@ What happened in the last hour?
 ```
 
 Gemma reads the event log and replies with a list of recent events (timestamp + scene description). Follow up with "show me the 3pm one" and `send_photo` retrieves the JPEG.
+
+## Tuning motion detection
+
+Motion detection runs a frame-difference loop with a configurable threshold. The default `MOTION_THRESHOLD=10` is what's been validated end-to-end on the developer's indoor scene (mixed lighting, ~70KB JPEG frames). Your camera's noise floor will differ — too sensitive and you get spurious fires from sensor noise and lighting flicker; too conservative and real movement gets ignored.
+
+Override with env vars at startup. None of these need a rebuild:
+
+| Env | Default | Notes |
+|---|---|---|
+| `MOTION_THRESHOLD` | `10` | Mean absolute pixel difference (0–255). Raise if your scene has noisy lighting; lower for stable scenes where you want subtle movement. |
+| `MOTION_INTERVAL_MS` | `3000` | Capture interval in milliseconds. Lower = snappier, more CPU. |
+| `MOTION_COOLDOWN_S` | `30` | Quiet window after a fire. Prevents one person walking past from generating a flood. |
+| `MOTION_EDGE_CROP` | `0.05` | Ignore the outer N% of the frame (wind on branches, sun glare on lens housing). |
+| `MOTION_ENABLED` | `true` | Set `false` to disable motion entirely (use `/trigger` or GPIO instead). |
+
+To find the right threshold for your scene, sit still in front of the camera for ~30s with `MOTION_THRESHOLD=1` and watch `tail -f /tmp/picapture.log` — the diff numbers tell you your noise floor. Pick a threshold a few points above it.
 
 ## Privacy
 
@@ -229,18 +248,20 @@ cmd/
   gatemanai/      laptop process: presence loop + outbound pipeline + event store
   mcpserver/      MCP stdio server: capture_door, recent_events, send_photo
   picapture/      Pi HTTP server: capture, presence (long-poll), trigger, health
+                  (auto-detects rpicam-still / libcamera-still / raspistill)
   rtspsource/     drop-in replacement for picapture against any RTSP camera
-  doctor/         pre-flight system health check
+  doctor/         pre-flight system health check (8 checks)
   allow/          operator helper: sync allowFrom + MCP env in one command
-  visiontest/     ad-hoc vision + WhatsApp test harness
 internal/
   camera/         HTTP capture client (tested)
   presence/       long-poll the camera source with adaptive backoff (tested)
   motion/         pure-Go frame-differencing motion detector (tested)
   events/         JSONL event store + 7-day janitor (tested)
-  vision/         Ollama /api/chat client for Gemma 4
+  vision/         Ollama /api/chat client for Gemma 4 (tested)
   openclaw/       OpenClaw CLI wrapper for WhatsApp sends (tested)
   retry/          generic exponential-backoff helper (tested)
+.github/
+  workflows/      CI: go vet, go test -race, ARM cross-compile probes
 ```
 
 ## License

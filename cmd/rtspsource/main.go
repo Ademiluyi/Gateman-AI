@@ -199,7 +199,7 @@ func loadMotionConfig() motionConfig {
 		enabled:   envBool("MOTION_ENABLED", true),
 		interval:  time.Duration(envInt("MOTION_INTERVAL_MS", 3000)) * time.Millisecond,
 		cooldown:  time.Duration(envInt("MOTION_COOLDOWN_S", 30)) * time.Second,
-		threshold: envFloat("MOTION_THRESHOLD", 20),
+		threshold: envFloat("MOTION_THRESHOLD", 10),
 		edgeCrop:  envFloat("MOTION_EDGE_CROP", 0.05),
 	}
 }

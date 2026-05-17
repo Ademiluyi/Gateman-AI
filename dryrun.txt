@@ -1,43 +1,64 @@
-1. Pi side — make sure picapture is up                                                      
-   
-  ssh gateman-ai@192.168.0.119 "pgrep picapture || nohup ~/picapture > /tmp/picapture.log 2>&1&"                                                                                         
-                                                                                              
-  2. Make sure Ollama has the model warm (skips the 60s cold-load)                            
-                                                               
-  ollama run gemma4:e2b-8k "hi"                                                               
-  Wait for the reply, Ctrl-C out. Confirm:                                                    
-  ollama ps                                                                                   
-  Should show gemma4:e2b-8k loaded.                                                           
-                                                                                              
-  3. Make sure OpenClaw gateway is running                                                    
-   
-  openclaw gateway status | head -3                                                           
-                                                                                              
-  4. Pre-flight check                                                                         
-                                                                                              
-  cd /Users/ade/GitHub/Gemma-4-Good                                                           
-  export OPENCLAW_TO=+19198696632,+2347037220878                                              
-  export PI_URL=http://192.168.0.119:9000                                                     
-  ./doctor -pi-url http://192.168.0.119:9000                                                  
-  Fix anything that fails before continuing.                                                  
-                                                                                              
-  5. Start gatemanai (terminal 1, leave running)                                              
-                                                                                              
-  ./gatemanai                                                  
-                                                                                              
-  6. Start the multi-log view (terminal 2, leave running)                                     
-   
-  ./scripts/demo-logs.sh gateman-ai@192.168.0.119                                             
-                                                                                              
-  7. Test outbound (from terminal 3)                                                          
-                                                                                              
-  curl http://192.168.0.119:9000/trigger                                                      
-  Photo to both numbers in ~5s. Description in ~30-60s.        
-                                                                                              
-  8. Test inbound (from your phone, WhatsApp)
-                                                                                              
-  /new                                                         
-  Who's at the door?                                                                          
+1. Pi side — make sure picapture is up
+
+  ssh gateman-ai@192.168.0.119 "pgrep picapture || nohup ~/picapture > /tmp/picapture.log 2>&1 &"
+
+  Default MOTION_THRESHOLD=10 is baked in. Override with env vars if your scene differs (see README "Tuning motion detection").
+
+  If a stale picapture is running, replace it:
+  ssh -t gateman-ai@192.168.0.119 "sudo pkill -f picapture"
+  ssh gateman-ai@192.168.0.119 "nohup ~/picapture > /tmp/picapture.log 2>&1 & disown"
+
+2. Make sure Ollama has the model warm (skips the 60s cold-load)
+
+  ollama run gemma4:e2b-8k "hi"
+  Wait for the reply, Ctrl-C out. Confirm:
+  ollama ps
+  Should show gemma4:e2b-8k loaded.
+
+3. Sync the OpenClaw config (3-tool system prompt) and restart the gateway
+
+  cp /Users/ade/GitHub/Gemma-4-Good/openclaw.config.json5 ~/.openclaw/config.json5
+  openclaw gateway restart
+  openclaw gateway status | head -3
+
+4. Pre-flight check
+
+  cd /Users/ade/GitHub/Gemma-4-Good
+  export OPENCLAW_TO=+19198696632,+2347037220878
+  export PI_URL=http://192.168.0.119:9000
+  ./doctor -pi-url http://192.168.0.119:9000
+  Fix anything that fails before continuing.
+
+5. Start gatemanai (terminal 1, leave running)
+
+  ./gatemanai
+
+6. Start the multi-log view (terminal 2, leave running)
+
+  ./scripts/demo-logs.sh gateman-ai@192.168.0.119
+
+7. Test outbound — manual trigger (from terminal 3)
+
+  curl http://192.168.0.119:9000/trigger
+  Photo to both numbers in ~5s. Description in ~30-60s.
+
+8. Test outbound — motion detection
+  Walk in front of the Pi camera. Motion fires (diff ≥ 10), same pipeline as /trigger.
+
+9. Test inbound — live capture (WhatsApp)
+
+  /new
+  Who's outside?
   Photo to both numbers + "Photo sent." in ~10-15s.
-                                                                                              
-  That's it. Stop terminal 1 and 2 when done. 
+
+10. Test inbound — retrospective (WhatsApp)
+
+  /new
+  What happened today?
+  Gemma calls recent_events with the 24h default, replies with a list of timestamped events.
+
+  Follow up in the same thread (no /new):
+  Show me the first one
+  Gemma calls send_photo with the event id, original JPEG arrives.
+
+That's it. Stop terminal 1 and 2 when done.
