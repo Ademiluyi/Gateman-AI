@@ -4,7 +4,7 @@
 
 **Physical AI for environmental awareness, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
-GatemanAI compresses video surveillance into queryable events. A local AI watches your camera in real time, summarises what it sees as text + a key frame, and persists those summaries as an event log you can query over WhatsApp. Storage drops from gigabytes a day to kilobytes. Retrieval becomes a conversation, not a video scrubber. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
+GatemanAI compresses video surveillance into queryable events. A local AI watches your camera in real time, summarises what it sees as text + a key frame, and persists those summaries as an event log you can query over WhatsApp. Storage drops from gigabytes a day to kilobytes. Retrieval becomes a conversation, not a video scrubber. No app to install. No cloud AI inference. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
 
 The first use case is a deaf person who can't hear someone arriving. The second is a small-business owner in Lagos who needs to know who's outside the shop without leaving the till. The longer arc is agentic surveillance for the millions of people who use WhatsApp daily — the markets traditional CCTV and cloud doorbells don't reach.
 
