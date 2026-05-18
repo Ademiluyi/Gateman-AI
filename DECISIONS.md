@@ -218,3 +218,40 @@ Volumes are too small to justify a database. At an active entrance of 50 events/
 ### Single-writer invariant
 
 `gatemanai` is the only process that writes the log. `mcpserver` is read-only and may have multiple instances if OpenClaw re-spawns it. The single-writer constraint is what makes the append-only design safe: writers never collide with each other, and readers tolerate concurrent appends because each event is a single line that's fully flushed before the next.
+
+---
+
+## v0.2: structured vision output
+
+### What's not in v0.1
+
+The vision call in `internal/vision/vision.go` sends the camera frame to Gemma and returns whatever prose comes back. That string goes straight to WhatsApp as the description follow-up. There is no schema, no field validation, no fallback if the model produces something off-spec.
+
+This is fine for a demo and honest about what it is: a free-form caption. It is not a guardrail.
+
+### What v0.2 should add
+
+Force Gemma into a JSON schema via Ollama's `format` parameter:
+
+```go
+type DoorEvent struct {
+    PersonCount int      `json:"person_count"`
+    Description string   `json:"description"`    // ≤140 chars
+    Wearing     []string `json:"wearing"`
+    Vehicle     string   `json:"vehicle"`        // "" | "bike" | "car" | "truck"
+    Threat      string   `json:"threat_level"`   // "none" | "ambiguous" | "elevated"
+    Confidence  float32  `json:"confidence"`     // 0.0 to 1.0
+}
+```
+
+Validate after parsing: reject on empty `description`, out-of-range `confidence`, enum violations on `threat_level` or `vehicle`. On rejection, fall back to a fixed safe message ("Someone is at the gate.") rather than forwarding model output. The WhatsApp message is composed in Go from validated fields, not by the model.
+
+### Why this matters
+
+Three downstream wins, none of which v0.1 supports:
+
+1. **Hallucination surface shrinks.** The user never sees a sentence the model invented; they see fields the model filled.
+2. **`recent_events` becomes structurally queryable.** "Show me elevated events in the last hour" works against a field, not a substring match on prose.
+3. **Two-tier alerting becomes trivial.** `threat_level=elevated` triggers an immediate ping; everything else stays in the silent log.
+
+The cost is roughly an hour of focused work plus regression testing of the demo pipeline. Out of scope for the hackathon submission window, the obvious next step after.
