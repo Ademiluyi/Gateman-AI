@@ -2,7 +2,7 @@
 
 ## Product thesis: event-only surveillance
 
-GatemanAI's storage primitive is an **AI-summarised event**, not a video clip. A local Gemma watches the camera in real time and writes one JSONL line per event (timestamp + scene description + key-frame JPEG path). Users query the log over WhatsApp — *"what happened today?"*, *"show me the 3pm one."*
+GatemanAI's storage primitive is an **AI-summarised event** and key picture frames, not just a video clip. A local Gemma watches the camera in real time and writes one JSONL line per event (timestamp + scene description + key-frame JPEG path). Users query the log over WhatsApp — *"what happened today?"*, *"show me the 3pm one."*
 
 This is the load-bearing product decision. Every technical choice below — single-writer JSONL over SQLite, 8k Modelfile pinning, two-Gemma-call inbound workaround, pure-Go motion over OpenCV — exists because the storage and inference unit is an event, not a video frame stream.
 
@@ -10,9 +10,11 @@ Why this matters for the target market:
 
 - **Storage.** Traditional 1080p H.264 surveillance writes ~50GB/day per camera. Event-only writes ~150KB/day (50 events × ~3KB). A microSD lasts forever; cloud upload isn't needed.
 - **Retrieval.** "Scrubbing through footage" is the standard UX for finding an event. Event-only collapses retrieval into a WhatsApp message and a natural-language reply.
-- **Bandwidth.** WhatsApp-sized messages survive in Lagos / Nairobi / Dhaka bandwidth conditions that defeat live video streaming.
+- **Bandwidth.** WhatsApp-sized messages survive in Lagos / Nairobi / Dhaka bandwidth conditions that defeat live video streaming. Driven by its low data requirements and deep integration into daily personal and business communication
 
 The entrance camera is the wedge. The platform is surveillance for the markets that can't afford Ring, can't trust cloud DVRs, and can't scrub through hours of CCTV.
+
+
 
 ---
 

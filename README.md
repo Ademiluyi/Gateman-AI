@@ -1,25 +1,24 @@
 # GatemanAI
 
-[![CI](https://github.com/Ademiluyi/Gateman-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Ademiluyi/Gateman-AI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **Physical AI for environmental awareness, delivered through WhatsApp.** Built for the [Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon).
 
 GatemanAI compresses video surveillance into queryable events. A local AI watches your camera in real time, summarises what it sees as text + a key frame, and persists those summaries as an event log you can query over WhatsApp. Storage drops from gigabytes a day to kilobytes. Retrieval becomes a conversation, not a video scrubber. No app to install. No cloud AI inference. No per-message fees. Runs locally on a Raspberry Pi or any RTSP camera plus a laptop on the same network.
 
-The first use case is a deaf person who can't hear someone arriving. The second is a small-business owner in Lagos who needs to know who's outside the shop without leaving the till. The longer arc is agentic surveillance for the 2 billion people who use WhatsApp daily — the markets traditional CCTV and cloud doorbells don't reach.
+The first use case is a deaf person who can't hear someone arriving. The second is a small-business owner in Lagos who needs to know who's outside the shop without leaving the till. The longer arc is agentic surveillance for the millions of people who use WhatsApp daily — the markets traditional CCTV and cloud doorbells don't reach.
 
 For the full motivation, design, and submission writeup see [SUBMISSION.md](./SUBMISSION.md). For architectural decisions and constraints see [DECISIONS.md](./DECISIONS.md).
 
 ## Demo
 
-> Motion at the entrance → photo arrives in ~5 seconds → Gemma description follows ~30 seconds later.
+> Motion at the entrance → photo arrives in ~5 seconds → Gemma description follows seconds later.
 > User texts "who's outside?" → live photo arrives in ~15 seconds.
 > User texts "what happened in the last hour?" → Gemma reads the event log and replies.
 
 ## What you need
 
-- A **camera source.** Either a **Raspberry Pi** with a camera module (Pi 3 B+ is the tested baseline; Pi 4 / 5 also work) **or** any **RTSP camera** you already own — Hikvision, Dahua, ONVIF IP cam, ESP32-CAM. See [Use an existing camera](#use-an-existing-camera-rtsphikvisiondahua) below. The Pi binary auto-detects the still-capture tool: `rpicam-still` (Bookworm), `libcamera-still` (Bullseye), or `raspistill` (Buster).
+- A **camera source.** Either a **Raspberry Pi** with a camera module (Pi 3 B+ is the tested baseline; Pi 4 / 5 also work). The Pi binary auto-detects the still-capture tool: `rpicam-still` (Bookworm), `libcamera-still` (Bullseye), or `raspistill` (Buster).
 - A **laptop** on the same Wi-Fi as the camera (8GB RAM minimum; 16GB+ recommended)
 - A **WhatsApp account** linked via QR code to OpenClaw
 - [Ollama](https://ollama.com/) ≥ 0.22.1 with `gemma4:e2b` pulled
@@ -260,8 +259,6 @@ internal/
   vision/         Ollama /api/chat client for Gemma 4 (tested)
   openclaw/       OpenClaw CLI wrapper for WhatsApp sends (tested)
   retry/          generic exponential-backoff helper (tested)
-.github/
-  workflows/      CI: go vet, go test -race, ARM cross-compile probes
 ```
 
 ## License
